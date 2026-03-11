@@ -9,7 +9,7 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #222; }
-#map { width: 100%; height: 100vh; }
+#map { width: 100%; height: 100vh; position: relative; z-index: 0; }
 #controls {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
   background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);
@@ -34,6 +34,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   background: none; border: 2px solid #1976d2; color: #1976d2;
   width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
   font-size: 14px; display: flex; align-items: center; justify-content: center;
+  line-height: 1; padding: 0;
 }
 #play-btn:hover { background: rgba(25, 118, 210, 0.1); }
 #speed-select {
@@ -72,10 +73,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <div class="label">Date</div>
         <div class="value" id="v-date">----/--/--</div>
       </div>
-      <div class="info-block">
-        <div class="label">Race Time</div>
-        <div class="value" id="v-elapsed">--:--:--</div>
-      </div>
     </div>
     <div class="info-row">
       <div class="info-block">
@@ -94,8 +91,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
         <div class="value"><span id="v-race-dist">--</span><span class="unit">nm</span></div>
       </div>
       <div class="info-block">
-        <div class="label">Total Dist</div>
-        <div class="value"><span id="v-total-dist">--</span><span class="unit">nm</span></div>
+        <div class="label">Race Time</div>
+        <div class="value" id="v-elapsed">--:--:--</div>
       </div>
     </div>
   </div>
@@ -110,6 +107,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <option value="100" selected>100x</option>
       <option value="500">500x</option>
     </select>
+    <a id="dl-btn" href="RCSR2026.gpx" download="RCSR2026.gpx" title="GPX 다운로드" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:2px solid #1976d2;border-radius:50%;color:#1976d2;text-decoration:none;font-size:16px;flex-shrink:0;">&#8595;</a>
   </div>
   <div id="filter-info"></div>
 </div>
@@ -123,20 +121,15 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
 
 let points = [];
 let marker = null;
-let trackPreRace = null;
 let trackRace = null;
-let trackPostRace = null;
 let playing = false;
 let playInterval = null;
 let timeStart = 0, timeEnd = 0;
-let raceStartIdx = 0, raceFinishIdx = 0;
 
 // Race start: 2026-03-04 11:20 HKT = 03:20 UTC
 // Race finish: 2026-03-07 13:41 HKT = 05:41 UTC
 const RACE_START = Date.UTC(2026, 2, 4, 3, 20, 0) / 1000;
 const RACE_FINISH = Date.UTC(2026, 2, 7, 5, 41, 0) / 1000;
-let raceStartDist = 0;
-let raceFinishDist = 0;
 
 const timeline = document.getElementById('timeline');
 const playBtn = document.getElementById('play-btn');
@@ -278,32 +271,12 @@ function updateViewAtTime(t) {
   const interp = interpolateAt(t);
   marker.setLatLng([interp.lat, interp.lon]);
 
-  // Update past lines per segment
+  // Update past track
   const currIdx = interp.idx;
   const currPos = [interp.lat, interp.lon];
-
-  if (currIdx < raceStartIdx) {
-    // Still in pre-race
-    const coords = points.slice(0, currIdx + 1).map(p => [p.lat, p.lon]);
-    coords.push(currPos);
-    trackPreRace.setLatLngs(coords);
-    trackRace.setLatLngs([]);
-    trackPostRace.setLatLngs([]);
-  } else if (currIdx < raceFinishIdx) {
-    // In race
-    trackPreRace.setLatLngs(points.slice(0, raceStartIdx + 1).map(p => [p.lat, p.lon]));
-    const rCoords = points.slice(raceStartIdx, currIdx + 1).map(p => [p.lat, p.lon]);
-    rCoords.push(currPos);
-    trackRace.setLatLngs(rCoords);
-    trackPostRace.setLatLngs([]);
-  } else {
-    // Post-race
-    trackPreRace.setLatLngs(points.slice(0, raceStartIdx + 1).map(p => [p.lat, p.lon]));
-    trackRace.setLatLngs(points.slice(raceStartIdx, raceFinishIdx + 1).map(p => [p.lat, p.lon]));
-    const pCoords = points.slice(raceFinishIdx, currIdx + 1).map(p => [p.lat, p.lon]);
-    pCoords.push(currPos);
-    trackPostRace.setLatLngs(pCoords);
-  }
+  const rCoords = points.slice(0, currIdx + 1).map(p => [p.lat, p.lon]);
+  rCoords.push(currPos);
+  trackRace.setLatLngs(rCoords);
 
   // Smooth speed: average over nearby points (time-weighted window)
   let speedSum = 0, speedCount = 0;
@@ -314,74 +287,38 @@ function updateViewAtTime(t) {
   }
   const smoothSpeed = speedCount > 0 ? speedSum / speedCount : 0;
 
-  // Min/Max speed so far (race segment only)
+  // Min/Max speed so far
   let minSpeed = Infinity, maxSpeed = 0;
-  const startIdx = Math.max(raceStartIdx, 1);
-  const endIdx = Math.min(interp.idx, raceFinishIdx);
-  if (endIdx >= startIdx) {
-    for (let i = startIdx; i <= endIdx; i++) {
-      if (points[i].speed > 0.1) { // ignore near-zero
-        if (points[i].speed < minSpeed) minSpeed = points[i].speed;
-        if (points[i].speed > maxSpeed) maxSpeed = points[i].speed;
-      }
+  for (let i = 1; i <= interp.idx; i++) {
+    if (points[i].speed > 0.1) {
+      if (points[i].speed < minSpeed) minSpeed = points[i].speed;
+      if (points[i].speed > maxSpeed) maxSpeed = points[i].speed;
     }
   }
 
-  // Race distance: capped at finish
-  let raceDist = 0;
-  if (t >= RACE_START && t <= RACE_FINISH) {
-    raceDist = interp.dist - raceStartDist;
-  } else if (t > RACE_FINISH) {
-    raceDist = raceFinishDist - raceStartDist;
-  }
-  const totalDist = interp.dist;
-
-  // Race elapsed
-  let raceElapsed = 0;
-  if (t >= RACE_START && t <= RACE_FINISH) {
-    raceElapsed = t - RACE_START;
-  } else if (t > RACE_FINISH) {
-    raceElapsed = RACE_FINISH - RACE_START;
-  }
-
+  const raceDist = interp.dist;
+  const raceElapsed = t - RACE_START;
   const avgSpeed = raceElapsed > 0 && raceDist > 0 ? (raceDist / raceElapsed) * 3600 : 0;
 
   document.getElementById('v-time').textContent = formatHKT(t);
   document.getElementById('v-date').textContent = formatDate(t);
   document.getElementById('v-speed').textContent = smoothSpeed.toFixed(1);
   document.getElementById('v-avg-speed').textContent = avgSpeed.toFixed(1);
-  document.getElementById('v-race-dist').textContent = t >= RACE_START ? raceDist.toFixed(1) : '--';
-  document.getElementById('v-total-dist').textContent = totalDist.toFixed(1);
-  document.getElementById('v-elapsed').textContent = raceElapsed > 0 ? formatElapsed(raceElapsed) : '--';
+  document.getElementById('v-race-dist').textContent = raceDist.toFixed(1);
+  document.getElementById('v-elapsed').textContent = formatElapsed(raceElapsed);
   document.getElementById('v-minmax').textContent =
     (minSpeed < Infinity ? minSpeed.toFixed(1) : '--') + ' ~ ' +
     (maxSpeed > 0 ? maxSpeed.toFixed(1) : '--');
 }
 
 function initMap() {
-  // Find race start/finish indices
-  raceStartIdx = findIndexAtTime(RACE_START);
-  raceFinishIdx = findIndexAtTime(RACE_FINISH);
+  const allCoords = points.map(p => [p.lat, p.lon]);
 
-  const preRaceCoords = points.slice(0, raceStartIdx + 1).map(p => [p.lat, p.lon]);
-  const raceCoords = points.slice(raceStartIdx, raceFinishIdx + 1).map(p => [p.lat, p.lon]);
-  const postRaceCoords = points.slice(raceFinishIdx).map(p => [p.lat, p.lon]);
+  // Background: dim full route
+  L.polyline(allCoords, { color: '#ff5252', weight: 2, opacity: 0.2 }).addTo(map);
 
-  // Background layers (dim, always visible as "future" reference)
-  // Pre-race: gray dashed
-  L.polyline(preRaceCoords, { color: '#aaa', weight: 2, dashArray: '6,4', opacity: 0.6 }).addTo(map);
-  // Race future: green dim
-  L.polyline(raceCoords, { color: '#ff5252', weight: 2, opacity: 0.2 }).addTo(map);
-  // Post-race: gray dashed
-  L.polyline(postRaceCoords, { color: '#aaa', weight: 2, dashArray: '6,4', opacity: 0.6 }).addTo(map);
-
-  // Past overlay: bright colored, updates as slider moves
-  // Pre-race past: gray solid
-  trackPreRace = L.polyline([], { color: '#777', weight: 3 }).addTo(map);
-  // Race past: bright green
+  // Past track: bright, updates as slider moves
   trackRace = L.polyline([], { color: '#ff5252', weight: 3 }).addTo(map);
-  // Post-race past: gray solid
-  trackPostRace = L.polyline([], { color: '#777', weight: 3 }).addTo(map);
 
   const boatIcon = L.divIcon({
     html: '<div style="width:14px;height:14px;background:#ff5722;border:2px solid #fff;border-radius:50%;box-shadow:0 0 10px rgba(255,87,34,0.6);"></div>',
@@ -391,16 +328,10 @@ function initMap() {
   });
   marker = L.marker([points[0].lat, points[0].lon], { icon: boatIcon }).addTo(map);
 
-  const allCoords = points.map(p => [p.lat, p.lon]);
   map.fitBounds(L.latLngBounds(allCoords), { padding: [30, 30] });
 
   timeStart = points[0].time;
   timeEnd = points[points.length - 1].time;
-
-  const raceStartInterp = interpolateAt(RACE_START);
-  raceStartDist = raceStartInterp.dist;
-  const raceFinishInterp = interpolateAt(RACE_FINISH);
-  raceFinishDist = raceFinishInterp.dist;
 
   timeline.min = 0;
   timeline.max = Math.floor(timeEnd - timeStart);
@@ -437,7 +368,21 @@ playBtn.addEventListener('click', () => {
 });
 
 function loadGPXText(text) {
-  points = parseGPX(text);
+  let all = parseGPX(text);
+  // 레이스 구간만 남기기 (스타트 전/피니시 후 제거)
+  points = all.filter(p => p.time >= RACE_START && p.time <= RACE_FINISH);
+  // 거리 재계산 (0부터 시작)
+  for (let i = 0; i < points.length; i++) {
+    if (i === 0) {
+      points[i].dist = 0;
+      points[i].speed = 0;
+    } else {
+      const d = haversine(points[i-1].lat, points[i-1].lon, points[i].lat, points[i].lon);
+      points[i].dist = points[i-1].dist + d;
+      const dt = points[i].time - points[i-1].time;
+      points[i].speed = dt > 0 ? (d / dt) * 3600 : 0;
+    }
+  }
   map.invalidateSize();
   initMap();
   const fo = document.getElementById('file-overlay');
