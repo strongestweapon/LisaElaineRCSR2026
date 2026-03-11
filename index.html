@@ -51,17 +51,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 }
 #title-overlay .boat-name {
   font-family: 'Playfair Display', serif; font-style: italic;
-  font-size: 32px; color: #333; line-height: 1.1;
+  font-size: 42px; color: #333; line-height: 1.1;
+  text-shadow: 0 0 8px #fff, 0 0 16px #fff, 0 0 24px #fff;
 }
 #title-overlay .race-name {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 11px; color: #777; letter-spacing: 1.5px; text-transform: uppercase;
+  font-size: 14px; color: #666; letter-spacing: 1.5px; text-transform: uppercase;
+  text-shadow: 0 0 6px #fff, 0 0 12px #fff;
   margin-top: 2px;
 }
 
 @media (max-width: 600px) {
-  #title-overlay .boat-name { font-size: 24px; }
-  #title-overlay .race-name { font-size: 9px; letter-spacing: 1px; }
+  #title-overlay .boat-name { font-size: 31px; }
+  #title-overlay .race-name { font-size: 12px; letter-spacing: 1px; }
   #controls { padding: 6px 8px; }
   #info { margin-bottom: 3px; }
   .info-block { min-width: unset; white-space: nowrap; }
@@ -156,7 +158,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 </div>
 
 <script>
-const map = L.map('map', { zoomControl: true });
+const map = L.map('map', { zoomControl: false });
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap &copy; CARTO',
   maxZoom: 19
