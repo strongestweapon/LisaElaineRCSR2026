@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="YB Tracking Export" xmlns="http://www.topografix.com/GPX/1/1">
+ <rte>
+  <name>Rhumb Line - RCSR 2026</name>
+  <rtept lat="22.285555555555554" lon="114.18166666666667"> <name>Start</name></rtept>
+  <rtept lat="22.30021443817393" lon="114.20408248901367"></rtept>
+  <rtept lat="22.28925525380013" lon="114.22863006591797"></rtept>
+  <rtept lat="22.273053146400535" lon="114.25437927246094"></rtept>
+  <rtept lat="22.2290438399493" lon="114.27206039428711"></rtept>
+  <rtept lat="22.19121975096848" lon="114.31411743164062"></rtept>
+  <rtept lat="21.522198144369547" lon="114.86020716746684"></rtept>
+  <rtept lat="20.851416533883253" lon="115.40128400940822"></rtept>
+  <rtept lat="20.178950379203236" lon="115.93755054729446"></rtept>
+  <rtept lat="19.50487307143508" lon="116.46920506398115"></rtept>
+  <rtept lat="18.82925603409309" lon="116.99644169875931"></rtept>
+  <rtept lat="18.15216882057719" lon="117.5194506101546"></rtept>
+  <rtept lat="17.47367920828019" lon="118.03841813780292"></rtept>
+  <rtept lat="16.793853289474285" lon="118.55352696314873"></rtept>
+  <rtept lat="16.11275555912507" lon="119.06495626875885"></rtept>
+  <rtept lat="15.43044899977833" lon="119.5728818960722"></rtept>
+  <rtept lat="14.74699516366558" lon="120.07747650146484"></rtept>
+  <rtept lat="14.703164979173419" lon="120.14923095703125"></rtept>
+  <rtept lat="14.776666666666667" lon="120.22"> <name>Finish</name></rtept>
+ </rte>
+ <wpt lat="22.28555" lon="114.18167"><name>Start</name></wpt>
+ <wpt lat="14.78243" lon="120.20002"><name>Finish Line 1</name></wpt>
+ <wpt lat="14.77667" lon="120.22000"><name>Finish Line 2</name></wpt>
+ <wpt lat="14.77526" lon="120.22458"><name>Finish Line 3</name></wpt>
+ <rte>
+  <name>Tathong Channel Exclusion Zone</name>
+  <rtept lat="22.21930" lon="114.33578"></rtept>
+  <rtept lat="22.21930" lon="114.29357"></rtept>
+  <rtept lat="22.23375" lon="114.27607"></rtept>
+  <rtept lat="22.27072" lon="114.26078"></rtept>
+  <rtept lat="22.21930" lon="114.33578"></rtept>
+ </rte>
+</gpx>

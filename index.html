@@ -61,7 +61,42 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   margin-top: 2px;
 }
 
+.comp-tooltip { font-size: 11px !important; padding: 2px 6px !important; }
+
+#leaderboard {
+  position: fixed; top: 12px; right: 12px; z-index: 1000;
+  background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px);
+  border-radius: 8px; padding: 10px 12px; min-width: 200px;
+  color: #fff; font-size: 12px;
+}
+#leaderboard .lb-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+  color: #aaa; margin-bottom: 6px;
+}
+#leaderboard .lb-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+#leaderboard .lb-row:last-child { border-bottom: none; }
+#leaderboard .lb-rank {
+  font-weight: 700; font-size: 13px; width: 16px; text-align: center;
+}
+#leaderboard .lb-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+#leaderboard .lb-name {
+  flex: 1; font-size: 12px; white-space: nowrap;
+}
+#leaderboard .lb-name.is-lisa { font-weight: 700; }
+#leaderboard .lb-time {
+  font-variant-numeric: tabular-nums; font-size: 11px; color: #ccc;
+}
+
 @media (max-width: 600px) {
+  #leaderboard { top: auto; bottom: 220px; right: 8px; left: 8px; min-width: unset; padding: 8px 10px; }
+  #leaderboard .lb-title { font-size: 9px; }
+  #leaderboard .lb-row { font-size: 11px; }
+  #leaderboard .lb-time { font-size: 10px; }
   #title-overlay .boat-name { font-size: 31px; }
   #title-overlay .race-name { font-size: 12px; letter-spacing: 1px; }
   #controls { padding: 6px 8px; }
@@ -83,6 +118,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div id="title-overlay">
   <div class="boat-name">Lisa Elaine</div>
   <div class="race-name">Rolex China Sea Race 2026</div>
+</div>
+<div id="leaderboard">
+  <div class="lb-title">IRC Premier</div>
+  <div id="lb-rows"></div>
 </div>
 <div id="map"></div>
 <div id="controls">
@@ -170,6 +209,142 @@ let trackRace = null;
 let playing = false;
 let playInterval = null;
 let timeStart = 0, timeEnd = 0;
+
+// IRC Premier competitors with TcF (Time Correction Factor) from RaceSetup
+// finishedAt from YB RaceSetup (unix timestamp)
+const COMPETITORS = [
+  { file: 'fenice_yb.gpx', name: 'Fenice', color: '#D2691E', tcf: 1.206, finishedAt: 1772815721 },
+  { file: 'moonblue_2_yb.gpx', name: 'Moonblue 2', color: '#F0E68C', tcf: 1.195, finishedAt: 1772825783 },
+  { file: 'parnassus_yb.gpx', name: 'Parnassus', color: '#DDA0DD', tcf: 1.220, finishedAt: 1772826895 },
+];
+const LISA_TCF = 1.069;
+const competitors = []; // { name, color, tcf, points, marker, trackLine, bgLine }
+
+// IRC Projected Corrected Time:
+//   PCT = (elapsed + DTF / avgSpeed) × TcF
+//   - elapsed: time since race start (seconds)
+//   - DTF: distance to finish along rhumb line (nm)
+//   - avgSpeed: distance sailed / elapsed (knots)
+//   - TcF: IRC Time Correction Factor
+
+/**
+ * Calculate distance-to-finish: distance from current position to finish
+ * along the rhumb line waypoints.
+ */
+function calcDTF(lat, lon) {
+  // Find nearest rhumb line segment
+  let minDist = Infinity, nearestSeg = 0;
+  for (let i = 0; i < RHUMB_LINE.length - 1; i++) {
+    const dA = haversine(lat, lon, RHUMB_LINE[i][0], RHUMB_LINE[i][1]);
+    const dB = haversine(lat, lon, RHUMB_LINE[i + 1][0], RHUMB_LINE[i + 1][1]);
+    const segLen = haversine(RHUMB_LINE[i][0], RHUMB_LINE[i][1], RHUMB_LINE[i + 1][0], RHUMB_LINE[i + 1][1]);
+    // Check if projection falls on segment
+    const midDist = Math.min(dA, dB);
+    if (midDist < minDist) {
+      minDist = midDist;
+      nearestSeg = dA <= dB ? i : i + 1;
+    }
+  }
+  // Sum from nearest waypoint to finish
+  let dtf = haversine(lat, lon, RHUMB_LINE[nearestSeg][0], RHUMB_LINE[nearestSeg][1]);
+  for (let i = nearestSeg; i < RHUMB_LINE.length - 1; i++) {
+    dtf += haversine(RHUMB_LINE[i][0], RHUMB_LINE[i][1], RHUMB_LINE[i + 1][0], RHUMB_LINE[i + 1][1]);
+  }
+  return dtf;
+}
+
+/**
+ * Compute cumulative distance sailed for a points array (competitor)
+ */
+function calcDistSailed(pts, upToIdx) {
+  let dist = 0;
+  for (let i = 1; i <= upToIdx && i < pts.length; i++) {
+    dist += haversine(pts[i - 1].lat, pts[i - 1].lon, pts[i].lat, pts[i].lon);
+  }
+  return dist;
+}
+
+function updateLeaderboard(t) {
+  const elapsed = t - RACE_START;
+  const lbEl = document.getElementById('leaderboard');
+  const sliderAtZero = parseInt(document.getElementById('timeline').value) === 0;
+  if (sliderAtZero) {
+    const container = document.getElementById('lb-rows');
+    const allBoats = [
+      { name: 'Lisa Elaine', color: '#ff5722', isLisa: true },
+      ...COMPETITORS.map(c => ({ name: c.name, color: c.color, isLisa: false }))
+    ];
+    container.innerHTML = allBoats.map((e, i) =>
+      `<div class="lb-row">
+        <span class="lb-rank">${i + 1}</span>
+        <span class="lb-dot" style="background:${e.color}"></span>
+        <span class="lb-name${e.isLisa ? ' is-lisa' : ''}">${e.name}</span>
+        <span class="lb-time">--</span>
+      </div>`
+    ).join('');
+    return;
+  }
+
+  const entries = [];
+
+  // Lisa Elaine
+  const lisaFinished = t >= RACE_FINISH;
+  let lisaPCT;
+  if (lisaFinished) {
+    lisaPCT = (RACE_FINISH - RACE_START) * LISA_TCF;
+  } else {
+    const li = interpolateAt(t);
+    const lisaDist = li.dist || 0;
+    const lisaDTF = calcDTF(li.lat, li.lon);
+    const lisaAvg = elapsed > 0 ? lisaDist / (elapsed / 3600) : 0;
+    const lisaRemaining = lisaAvg > 0 ? (lisaDTF / lisaAvg) * 3600 : Infinity;
+    lisaPCT = (elapsed + lisaRemaining) * LISA_TCF;
+  }
+  entries.push({ name: 'Lisa Elaine', color: '#ff5722', pct: lisaPCT, isLisa: true, finished: lisaFinished });
+
+  // Competitors
+  for (const comp of competitors) {
+    if (!comp.points.length) continue;
+    const cFirst = comp.points[0].time;
+    const cLast = comp.points[comp.points.length - 1].time;
+
+    // Skip if race hasn't started for this boat yet
+    if (t < cFirst) continue;
+
+    if (t > cLast) {
+      // Finished: show actual corrected time
+      const finishElapsed = cLast - RACE_START;
+      const actualCorrected = finishElapsed * comp.tcf;
+      entries.push({ name: comp.name, color: comp.color, pct: actualCorrected, isLisa: false, finished: true });
+    } else {
+      const ci = interpolateAt(t, comp.points);
+      let cDistSailed = calcDistSailed(comp.points, ci.idx);
+      if (ci.idx < comp.points.length - 1) {
+        cDistSailed += haversine(comp.points[ci.idx].lat, comp.points[ci.idx].lon, ci.lat, ci.lon);
+      }
+      const cDTF = calcDTF(ci.lat, ci.lon);
+      const cAvg = elapsed > 0 ? cDistSailed / (elapsed / 3600) : 0;
+      const cRemaining = cAvg > 0 ? (cDTF / cAvg) * 3600 : Infinity;
+      const cPCT = (elapsed + cRemaining) * comp.tcf;
+      entries.push({ name: comp.name, color: comp.color, pct: cPCT, isLisa: false, finished: false });
+    }
+  }
+
+  // Sort by projected corrected time
+  entries.sort((a, b) => a.pct - b.pct);
+
+  const container = document.getElementById('lb-rows');
+  container.innerHTML = entries.map((e, i) => {
+    const timeStr = isFinite(e.pct) ? formatElapsed(e.pct) : '--';
+    const finTag = e.finished ? ' F' : '';
+    return `<div class="lb-row">
+      <span class="lb-rank">${i + 1}</span>
+      <span class="lb-dot" style="background:${e.color}"></span>
+      <span class="lb-name${e.isLisa ? ' is-lisa' : ''}">${e.name}</span>
+      <span class="lb-time">${timeStr}${finTag}</span>
+    </div>`;
+  }).join('');
+}
 
 // Race start: 2026-03-04 11:20 HKT = 03:20 UTC
 // Race finish: 2026-03-07 13:41 HKT = 05:41 UTC
@@ -261,31 +436,49 @@ function parseGPX(xml) {
   return filtered;
 }
 
-function findIndexAtTime(t) {
-  let lo = 0, hi = points.length - 1;
+function findIndexAtTime(t, pts) {
+  pts = pts || points;
+  let lo = 0, hi = pts.length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
-    if (points[mid].time <= t) lo = mid;
+    if (pts[mid].time <= t) lo = mid;
     else hi = mid - 1;
   }
   return lo;
 }
 
-function interpolateAt(t) {
-  const idx = findIndexAtTime(t);
-  const p0 = points[idx];
-  if (idx >= points.length - 1) return { lat: p0.lat, lon: p0.lon, dist: p0.dist, speed: p0.speed, idx };
-  const p1 = points[idx + 1];
+function interpolateAt(t, pts) {
+  pts = pts || points;
+  const idx = findIndexAtTime(t, pts);
+  const p0 = pts[idx];
+  if (idx >= pts.length - 1) return { lat: p0.lat, lon: p0.lon, dist: p0.dist, speed: p0.speed, idx };
+  const p1 = pts[idx + 1];
   const dt = p1.time - p0.time;
   if (dt <= 0) return { lat: p0.lat, lon: p0.lon, dist: p0.dist, speed: p0.speed, idx };
   const frac = (t - p0.time) / dt;
   return {
     lat: p0.lat + (p1.lat - p0.lat) * frac,
     lon: p0.lon + (p1.lon - p0.lon) * frac,
-    dist: p0.dist + (p1.dist - p0.dist) * frac,
-    speed: p0.speed + (p1.speed - p0.speed) * frac,
+    dist: (p0.dist || 0) + ((p1.dist || 0) - (p0.dist || 0)) * frac,
+    speed: (p0.speed || 0) + ((p1.speed || 0) - (p0.speed || 0)) * frac,
     idx
   };
+}
+
+function parseGPXSimple(xml) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'text/xml');
+  const trkpts = doc.querySelectorAll('trkpt');
+  const pts = [];
+  trkpts.forEach(pt => {
+    const lat = parseFloat(pt.getAttribute('lat'));
+    const lon = parseFloat(pt.getAttribute('lon'));
+    const timeEl = pt.querySelector('time');
+    const time = timeEl ? new Date(timeEl.textContent).getTime() / 1000 : null;
+    if (time !== null && !isNaN(lat) && !isNaN(lon)) pts.push({ lat, lon, time });
+  });
+  pts.sort((a, b) => a.time - b.time);
+  return pts;
 }
 
 function formatHKT(ts) {
@@ -357,10 +550,108 @@ function updateViewAtTime(t) {
   document.getElementById('v-minmax').textContent =
     (minSpeed < Infinity ? minSpeed.toFixed(1) : '--') + ' ~ ' +
     (maxSpeed > 0 ? maxSpeed.toFixed(1) : '--');
+
+  // Update competitor positions
+  for (const comp of competitors) {
+    if (!comp.points.length) continue;
+    const cFirst = comp.points[0].time;
+    const cLast = comp.points[comp.points.length - 1].time;
+    if (t < cFirst) {
+      comp.marker.setStyle({ opacity: 0, fillOpacity: 0 });
+      comp.marker.setLatLng([comp.points[0].lat, comp.points[0].lon]);
+      comp.trackLine.setLatLngs([]);
+    } else if (t > cLast) {
+      comp.marker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+      const last = comp.points[comp.points.length - 1];
+      comp.marker.setLatLng([last.lat, last.lon]);
+      comp.trackLine.setLatLngs(comp.points.map(p => [p.lat, p.lon]));
+    } else {
+      comp.marker.setStyle({ opacity: 1, fillOpacity: 0.9 });
+      const ci = interpolateAt(t, comp.points);
+      comp.marker.setLatLng([ci.lat, ci.lon]);
+      const coords = comp.points.slice(0, ci.idx + 1).map(p => [p.lat, p.lon]);
+      coords.push([ci.lat, ci.lon]);
+      comp.trackLine.setLatLngs(coords);
+    }
+  }
+
+  updateLeaderboard(t);
 }
+
+// Rhumb line waypoints from YB Tracking RaceSetup course.nodes
+const RHUMB_LINE = [
+  [22.285555555555554, 114.18166666666667],
+  [22.30021443817393, 114.20408248901367],
+  [22.28925525380013, 114.22863006591797],
+  [22.273053146400535, 114.25437927246094],
+  [22.2290438399493, 114.27206039428711],
+  [22.19121975096848, 114.31411743164062],
+  [21.522198144369547, 114.86020716746684],
+  [20.851416533883253, 115.40128400940822],
+  [20.178950379203236, 115.93755054729446],
+  [19.50487307143508, 116.46920506398115],
+  [18.82925603409309, 116.99644169875931],
+  [18.15216882057719, 117.5194506101546],
+  [17.47367920828019, 118.03841813780292],
+  [16.793853289474285, 118.55352696314873],
+  [16.11275555912507, 119.06495626875885],
+  [15.43044899977833, 119.5728818960722],
+  [14.74699516366558, 120.07747650146484],
+  [14.703164979173419, 120.14923095703125],
+  [14.776666666666667, 120.22]
+];
+
+// Tathong Channel Exclusion Zone
+const EXCLUSION_ZONE = [
+  [22.21930, 114.33578],
+  [22.21930, 114.29357],
+  [22.23375, 114.27607],
+  [22.27072, 114.26078],
+  [22.21930, 114.33578] // close polygon
+];
+
+// Finish line
+const FINISH_LINE = [
+  [14.78243, 120.20002],
+  [14.77667, 120.22000],
+  [14.77526, 120.22458]
+];
 
 function initMap() {
   const allCoords = points.map(p => [p.lat, p.lon]);
+
+  // Rhumb line
+  L.polyline(RHUMB_LINE, { color: '#ffffff', weight: 2, opacity: 0.6, dashArray: '8, 6' }).addTo(map);
+
+  // Exclusion zone
+  L.polygon(EXCLUSION_ZONE, { color: '#f2ff00', weight: 1.5, fillColor: '#f2ff00', fillOpacity: 0.15 }).addTo(map);
+
+  // Finish line
+  L.polyline(FINISH_LINE, { color: '#ff4444', weight: 2.5, opacity: 0.8 }).addTo(map);
+
+  // Start marker
+  L.circleMarker([22.28555, 114.18167], {
+    radius: 4, fillColor: '#4aff00', fillOpacity: 0.8, color: '#fff', weight: 1
+  }).addTo(map);
+
+  // Competitor layers (drawn first so Lisa Elaine is on top)
+  for (const comp of competitors) {
+    if (!comp.points.length) continue;
+    // Dim full track
+    comp.bgLine = L.polyline(comp.points.map(p => [p.lat, p.lon]), {
+      color: comp.color, weight: 1.5, opacity: 0.15
+    }).addTo(map);
+    // Animated past track
+    comp.trackLine = L.polyline([], { color: comp.color, weight: 2, opacity: 0.7 }).addTo(map);
+    // Marker with label
+    comp.marker = L.circleMarker([comp.points[0].lat, comp.points[0].lon], {
+      radius: 5, fillColor: comp.color, fillOpacity: 0.9, color: '#fff', weight: 1.5
+    }).addTo(map);
+    comp.marker.bindTooltip(comp.name, {
+      permanent: false, direction: 'top', offset: [0, -8],
+      className: 'comp-tooltip'
+    });
+  }
 
   // Background: dim full route
   L.polyline(allCoords, { color: '#ff5252', weight: 2, opacity: 0.2 }).addTo(map);
@@ -372,6 +663,10 @@ function initMap() {
     radius: 7, fillColor: '#ff5722', fillOpacity: 1,
     color: '#fff', weight: 2
   }).addTo(map);
+  marker.bindTooltip('Lisa Elaine', {
+    permanent: false, direction: 'top', offset: [0, -10],
+    className: 'comp-tooltip'
+  });
 
   map.on('zoomstart', () => { isZooming = true; });
   map.on('zoomend', () => {
@@ -418,6 +713,19 @@ playBtn.addEventListener('click', () => {
   }
 });
 
+async function loadCompetitors() {
+  for (const c of COMPETITORS) {
+    try {
+      const res = await fetch(c.file);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const raw = parseGPXSimple(text);
+      const pts = raw.filter(p => p.time >= RACE_START && p.time <= c.finishedAt);
+      competitors.push({ name: c.name, color: c.color, tcf: c.tcf, points: pts, marker: null, trackLine: null, bgLine: null });
+    } catch (e) { /* skip if not found */ }
+  }
+}
+
 function loadGPXText(text) {
   let all = parseGPX(text);
   // 레이스 구간만 남기기 (스타트 전/피니시 후 제거)
@@ -440,27 +748,28 @@ function loadGPXText(text) {
   if (fo) fo.style.display = 'none';
 }
 
-// 기본 GPX 파일 자동 로드 (HTTP 서버 필요)
-fetch('RCSR2026.gpx')
-  .then(r => r.ok ? r.text() : Promise.reject('File not found'))
-  .then(loadGPXText)
-  .catch(() => {
-    // file:// 프로토콜이면 fetch 실패 → 파일 선택 UI 표시
-    const overlay = document.createElement('div');
-    overlay.id = 'file-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(245,245,245,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2000;';
-    overlay.innerHTML = '<h1 style="font-size:24px;margin-bottom:20px;color:#1976d2;">GPX Viewer</h1>' +
-      '<label style="padding:12px 32px;background:#1976d2;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:16px;" for="gpx-file">GPX 파일 선택</label>' +
-      '<input type="file" id="gpx-file" accept=".gpx" style="display:none" />';
-    document.body.appendChild(overlay);
-    document.getElementById('gpx-file').addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => loadGPXText(ev.target.result);
-      reader.readAsText(file);
+// Load competitors first, then Lisa Elaine
+loadCompetitors().then(() => {
+  fetch('RCSR2026.gpx')
+    .then(r => r.ok ? r.text() : Promise.reject('File not found'))
+    .then(loadGPXText)
+    .catch(() => {
+      const overlay = document.createElement('div');
+      overlay.id = 'file-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(245,245,245,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:2000;';
+      overlay.innerHTML = '<h1 style="font-size:24px;margin-bottom:20px;color:#1976d2;">GPX Viewer</h1>' +
+        '<label style="padding:12px 32px;background:#1976d2;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:16px;" for="gpx-file">GPX 파일 선택</label>' +
+        '<input type="file" id="gpx-file" accept=".gpx" style="display:none" />';
+      document.body.appendChild(overlay);
+      document.getElementById('gpx-file').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => loadGPXText(ev.target.result);
+        reader.readAsText(file);
+      });
     });
-  });
+});
 </script>
 </body>
 </html>
